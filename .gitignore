@@ -1,0 +1,12 @@
+# Portfolio databases — MUST never be committed.
+# GitHub Pages only serves public repos, so anything committed here is public.
+# The site reads the database from a local file picker at runtime instead.
+*.db
+*.duckdb
+*.db.wal
+*.duckdb.wal
+*.wal
+
+node_modules/
+dist/
+.DS_Store

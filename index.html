@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portfolio Overview</title>
+  </head>
+  <body>
+    <main>
+      <!-- State 1: pick a database -->
+      <section id="picker" class="view">
+        <h1>Portfolio Overview</h1>
+        <label id="dropzone" for="file-input">
+          <p class="dz-title">Drop your database here</p>
+          <p class="dz-or">or</p>
+          <span class="button">Choose file…</span>
+          <input id="file-input" type="file" accept=".db,.duckdb" hidden />
+        </label>
+        <p class="privacy">
+          The database is read inside your browser. It is never uploaded.
+        </p>
+        <p id="picker-error" class="error" hidden></p>
+      </section>
+
+      <!-- State 2: show the user table -->
+      <section id="results" class="view" hidden>
+        <header class="results-head">
+          <div>
+            <h1>Portfolio Overview</h1>
+            <p id="source" class="meta"></p>
+          </div>
+          <button id="reset" class="button secondary" type="button">
+            Load a different database
+          </button>
+        </header>
+        <div id="table-host"></div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
