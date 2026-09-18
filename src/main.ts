@@ -2,21 +2,23 @@ import './style.css'
 import { PortfolioDb } from './db'
 import { freezeLabelColumns, renderPivot } from './table'
 import { renderChart } from './chart'
+import { renderDeltaChart } from './delta-chart'
 import {
   accountTypes,
+  changesByMonth,
   loadPortfolio,
   monthKeys,
   pivot,
   totalsByMonth,
   totalsByType,
 } from './portfolio'
-import type { Portfolio, SeriesPoint, TypeSeries } from './portfolio'
+import type { DeltaPoint, Portfolio, SeriesPoint, TypeSeries } from './portfolio'
 import { createMultiSelect } from './multi-select'
 import type { MultiSelect } from './multi-select'
 import { createTimeWindowPicker, defaultWindow } from './time-window'
 import type { MonthWindow } from './time-window'
 
-const REQUIRED_TABLES = ['user', 'account', 'account_status']
+const REQUIRED_TABLES = ['user', 'account', 'account_balance']
 
 const picker = document.querySelector<HTMLElement>('#picker')!
 const results = document.querySelector<HTMLElement>('#results')!
@@ -25,6 +27,7 @@ const fileInput = document.querySelector<HTMLInputElement>('#file-input')!
 const pickerError = document.querySelector<HTMLElement>('#picker-error')!
 const source = document.querySelector<HTMLElement>('#source')!
 const chartHost = document.querySelector<HTMLElement>('#chart-host')!
+const deltaHost = document.querySelector<HTMLElement>('#delta-host')!
 const tableHost = document.querySelector<HTMLElement>('#table-host')!
 const userSelectHost = document.querySelector<HTMLElement>('#user-select-host')!
 const typeSelectHost = document.querySelector<HTMLElement>('#type-select-host')!
@@ -42,13 +45,15 @@ const selectedUsers = new Set<number>()
 const selectedTypes = new Set<string>()
 let monthWindow: MonthWindow = { from: 0, to: 0 }
 
-// Kept between renders so a resize can redraw the chart at the new width
+// Kept between renders so a resize can redraw the charts at the new width
 // without recomputing the pivot or resetting the table's scroll position.
 let series: SeriesPoint[] = []
 let bands: TypeSeries[] = []
-/** Width the chart was last drawn at, so a resize can tell whether it matters. */
+let changes: DeltaPoint[] = []
+/** Width each chart was last drawn at, so a resize can tell whether it matters. */
 let chartWidth = 0
-/** Whether the chart splits the total into one area per account type. */
+let deltaWidth = 0
+/** Whether the area chart splits the total into one area per account type. */
 let stacked = false
 
 function showError(message: string): void {
@@ -103,12 +108,26 @@ function drawChart(): void {
   })
 }
 
-// The chart is laid out in pixels, so it has to be redrawn whenever its box
+/** The same for the month-over-month bars below it. */
+function drawDelta(): void {
+  if (series.length === 0) {
+    deltaHost.replaceChildren()
+    deltaWidth = 0
+    return
+  }
+  deltaWidth = deltaHost.clientWidth
+  renderDeltaChart(deltaHost, changes)
+}
+
+// The charts are laid out in pixels, so each has to be redrawn whenever its box
 // changes width — a window resize, but also the page's own scrollbar appearing
-// once the chart is in place. Comparing widths first keeps that from looping.
+// once they are in place. Comparing widths first keeps that from looping.
 new ResizeObserver(() => {
   if (chartHost.clientWidth !== chartWidth) drawChart()
 }).observe(chartHost)
+new ResizeObserver(() => {
+  if (deltaHost.clientWidth !== deltaWidth) drawDelta()
+}).observe(deltaHost)
 
 function renderPortfolio(): void {
   if (!portfolio) return
@@ -116,14 +135,18 @@ function renderPortfolio(): void {
   if (selectedUsers.size === 0) {
     series = []
     bands = []
+    changes = []
     drawChart()
+    drawDelta()
     tableHost.replaceChildren(emptyNote('Select at least one user.'))
     return
   }
   if (selectedTypes.size === 0) {
     series = []
     bands = []
+    changes = []
     drawChart()
+    drawDelta()
     tableHost.replaceChildren(emptyNote('Select at least one account type.'))
     return
   }
@@ -136,7 +159,9 @@ function renderPortfolio(): void {
   })
   series = totalsByMonth(result)
   bands = totalsByType(result)
+  changes = changesByMonth(series)
   drawChart()
+  drawDelta()
 
   tableHost.replaceChildren(
     renderPivot(result, {

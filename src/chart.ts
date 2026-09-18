@@ -1,83 +1,26 @@
+import {
+  HEIGHT,
+  PAD,
+  changeFormat,
+  geometryFor,
+  scaleFor,
+  svg,
+  totalFormat,
+  xAxis,
+  yAxis,
+  yScale,
+} from './chart-core'
 import { monthLabel } from './portfolio'
 import type { SeriesPoint, TypeSeries } from './portfolio'
 
-/**
- * Fixed pixel geometry rather than a scaled viewBox: scaling a viewBox to the
- * container would stretch the text and the stroke with it, so the chart is laid
- * out at the width it is actually given and re-rendered when that changes.
- */
-const HEIGHT = 260
-/* `right` leaves room for half of the last month label, which is centred on the
-   final point and would otherwise be cut off by the edge of the SVG. */
-const PAD = { top: 18, right: 32, bottom: 30, left: 64 }
-const TICK_COUNT = 4
-/** Width one x label needs before its neighbours start colliding. */
-const LABEL_WIDTH = 64
 const GRADIENT_ID = 'chart-area-fill'
 /** How many band colours the stylesheet defines, past which they repeat. */
 const BAND_COLOURS = 6
 
-const axisFormat = new Intl.NumberFormat(undefined, {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-})
-const totalFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 })
-const changeFormat = new Intl.NumberFormat(undefined, {
-  maximumFractionDigits: 1,
-  signDisplay: 'exceptZero',
-})
 const shareFormat = new Intl.NumberFormat(undefined, {
   style: 'percent',
   maximumFractionDigits: 0,
 })
-
-function svg<K extends keyof SVGElementTagNameMap>(
-  name: K,
-  attrs: Record<string, string | number> = {},
-): SVGElementTagNameMap[K] {
-  const element = document.createElementNS('http://www.w3.org/2000/svg', name)
-  for (const [key, value] of Object.entries(attrs)) {
-    element.setAttribute(key, String(value))
-  }
-  return element
-}
-
-/**
- * Rounds a raw step up to 1, 2, 2.5 or 5 times a power of ten, so the y labels
- * land on round numbers instead of on whatever the data's maximum happens to be.
- */
-function niceStep(raw: number): number {
-  const magnitude = 10 ** Math.floor(Math.log10(raw))
-  for (const factor of [1, 2, 2.5, 5]) {
-    if (raw <= factor * magnitude) return factor * magnitude
-  }
-  return 10 * magnitude
-}
-
-interface Scale {
-  lo: number
-  hi: number
-  ticks: number[]
-}
-
-/**
- * The y domain always includes zero, so the area has an honest baseline and a
- * 2% wiggle on a large balance cannot be drawn as a cliff. Negative totals (a
- * debt account in the selection) push the baseline below zero instead of
- * clipping.
- */
-function scaleFor(values: readonly number[]): Scale {
-  const min = Math.min(0, ...values)
-  const max = Math.max(0, ...values)
-  if (min === max) return { lo: 0, hi: 1, ticks: [0, 1] }
-
-  const step = niceStep((max - min) / TICK_COUNT)
-  const lo = Math.floor(min / step) * step
-  const hi = Math.ceil(max / step) * step
-  const ticks: number[] = []
-  for (let value = lo; value <= hi + step / 2; value += step) ticks.push(value)
-  return { lo, hi, ticks }
-}
 
 /**
  * The lower and upper edge of each band, month by month. A band is the running
@@ -180,8 +123,8 @@ export function renderChart(
   // scrollbar appearing afterwards, which is why the caller re-renders on a
   // resize of the host.
   const width = body.clientWidth
-  const innerWidth = Math.max(80, width - PAD.left - PAD.right)
-  const innerHeight = HEIGHT - PAD.top - PAD.bottom
+  const geometry = geometryFor(width)
+  const { innerWidth, innerHeight } = geometry
 
   const edges = stackEdges(bands, series.length)
   const scale = scaleFor(
@@ -192,8 +135,7 @@ export function renderChart(
     series.length === 1
       ? PAD.left + innerWidth / 2
       : PAD.left + (index * innerWidth) / (series.length - 1)
-  const yAt = (value: number): number =>
-    PAD.top + (innerHeight * (scale.hi - value)) / (scale.hi - scale.lo)
+  const yAt = yScale(scale, geometry)
 
   const plot = svg('svg', {
     width,
@@ -221,29 +163,8 @@ export function renderChart(
 
   // Bands are opaque, so under a stack the grid has to go on top of them or it
   // disappears; it is drawn in the surface colour there to read as a hairline
-  // rather than a fourth band edge. The labels are outside the plot either way.
-  const grid = svg('g', { class: stacked ? 'chart-grid-over' : '' })
-  for (const value of scale.ticks) {
-    const y = yAt(value)
-    grid.append(
-      svg('line', {
-        class: value === 0 ? 'chart-grid chart-zero' : 'chart-grid',
-        x1: PAD.left,
-        y1: y,
-        x2: PAD.left + innerWidth,
-        y2: y,
-      }),
-    )
-    const label = svg('text', {
-      class: 'chart-axis',
-      x: PAD.left - 10,
-      y,
-      dy: '0.32em',
-      'text-anchor': 'end',
-    })
-    label.textContent = axisFormat.format(value)
-    plot.append(label)
-  }
+  // rather than a fourth band edge.
+  const grid = yAxis(plot, scale, yAt, geometry, stacked ? 'chart-grid-over' : '')
   if (!stacked) plot.append(grid)
 
   const points = series.map((point, index) => `${xAt(index)},${yAt(point.total)}`)
@@ -293,19 +214,7 @@ export function renderChart(
     }
   }
 
-  const stride = Math.ceil(series.length / Math.max(2, Math.floor(innerWidth / LABEL_WIDTH)))
-  // Walking back from the newest month keeps it labelled — it is the one a
-  // reader looks for first.
-  for (let index = series.length - 1; index >= 0; index -= stride) {
-    const label = svg('text', {
-      class: 'chart-axis',
-      x: xAt(index),
-      y: HEIGHT - PAD.bottom + 18,
-      'text-anchor': 'middle',
-    })
-    label.textContent = monthLabel(series[index]!.monthKey)
-    plot.append(label)
-  }
+  xAxis(plot, series.map((point) => monthLabel(point.monthKey)), xAt, geometry)
 
   const guide = svg('line', {
     class: 'chart-guide',
