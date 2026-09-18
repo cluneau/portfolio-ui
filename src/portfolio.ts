@@ -103,6 +103,54 @@ export interface Pivot {
   rows: PivotRow[]
 }
 
+/** One point of the aggregated series: every selected account, summed. */
+export interface SeriesPoint {
+  monthKey: number
+  total: number
+}
+
+/**
+ * The selection's total, month by month. A month an account has no row for
+ * contributes nothing rather than carrying its last known balance forward, so a
+ * missing record reads as a dip — the same gap the table shows as `—`.
+ */
+export function totalsByMonth({ months, rows }: Pivot): SeriesPoint[] {
+  return months.map((monthKey, column) => ({
+    monthKey,
+    total: rows.reduce((sum, row) => sum + (row.amounts[column] ?? 0), 0),
+  }))
+}
+
+/** One account type's contribution, aligned column-for-column with `Pivot.months`. */
+export interface TypeSeries {
+  type: string
+  totals: number[]
+}
+
+/**
+ * The same totals split by account type, for the stacked view. Types are
+ * ordered by name so a band keeps its colour as the selection changes, and
+ * every type present in the selection gets a series — the bands therefore add
+ * up to `totalsByMonth` exactly.
+ */
+export function totalsByType({ months, rows }: Pivot): TypeSeries[] {
+  const byType = new Map<string, number[]>()
+  for (const row of rows) {
+    let totals = byType.get(row.account.type)
+    if (!totals) {
+      totals = months.map(() => 0)
+      byType.set(row.account.type, totals)
+    }
+    for (const [column, amount] of row.amounts.entries()) {
+      totals[column] = (totals[column] ?? 0) + (amount ?? 0)
+    }
+  }
+
+  return [...byType.entries()]
+    .map(([type, totals]) => ({ type, totals }))
+    .sort((a, b) => a.type.localeCompare(b.type))
+}
+
 export interface PivotFilter {
   users: ReadonlySet<number>
   types: ReadonlySet<string>
