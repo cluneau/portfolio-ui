@@ -15,7 +15,7 @@ export interface Account {
 
 /**
  * One (account, month) observation: the join of user, account and
- * account_status, flattened. The whole table is small enough to hold in memory,
+ * account_balance, flattened. The whole table is small enough to hold in memory,
  * so the database is read once at load and every later view is a pure filter.
  */
 export interface PortfolioRow {
@@ -44,7 +44,7 @@ export function monthLabel(monthKey: number): string {
 
 /**
  * Reads the whole portfolio into memory. `account.user_id` is the authoritative
- * owner — `account_status` carries a redundant copy, and joining on both would
+ * owner — `account_balance` carries a redundant copy, and joining on both would
  * silently drop rows whenever the two disagree.
  */
 export async function loadPortfolio(db: PortfolioDb): Promise<Portfolio> {
@@ -59,7 +59,7 @@ export async function loadPortfolio(db: PortfolioDb): Promise<Portfolio> {
             a.account_name,
             s.year * 100 + s.month AS month_key,
             s.amount
-     FROM account_status s
+     FROM account_balance s
      JOIN account a ON a.account_id = s.account_id
      JOIN "user" u ON u.user_id = a.user_id`,
   )
@@ -119,6 +119,31 @@ export function totalsByMonth({ months, rows }: Pivot): SeriesPoint[] {
     monthKey,
     total: rows.reduce((sum, row) => sum + (row.amounts[column] ?? 0), 0),
   }))
+}
+
+/** One month-over-month move in the selection's total. */
+export interface DeltaPoint {
+  monthKey: number
+  /** This month's total minus the previous month's. */
+  change: number
+  /** The previous month's total, so the change can also be read as a share. */
+  previous: number
+}
+
+/**
+ * The month-over-month change in the total. The first month of the window has
+ * no month before it inside the selection to compare against, so the series
+ * starts at the second — a one-month window has no change to show at all.
+ *
+ * The comparison is against the previous month *in the window*, not in the
+ * whole portfolio: the window is the period the reader chose, and reaching
+ * outside it for a baseline would report a change the chart above does not show.
+ */
+export function changesByMonth(series: readonly SeriesPoint[]): DeltaPoint[] {
+  return series.slice(1).map((point, index) => {
+    const previous = series[index]!.total
+    return { monthKey: point.monthKey, change: point.total - previous, previous }
+  })
 }
 
 /** One account type's contribution, aligned column-for-column with `Pivot.months`. */
