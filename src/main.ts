@@ -1,8 +1,16 @@
 import './style.css'
 import { PortfolioDb } from './db'
 import { freezeLabelColumns, renderPivot } from './table'
-import { accountTypes, loadPortfolio, monthKeys, pivot } from './portfolio'
-import type { Portfolio } from './portfolio'
+import { renderChart } from './chart'
+import {
+  accountTypes,
+  loadPortfolio,
+  monthKeys,
+  pivot,
+  totalsByMonth,
+  totalsByType,
+} from './portfolio'
+import type { Portfolio, SeriesPoint, TypeSeries } from './portfolio'
 import { createMultiSelect } from './multi-select'
 import type { MultiSelect } from './multi-select'
 import { createTimeWindowPicker, defaultWindow } from './time-window'
@@ -16,6 +24,7 @@ const dropzone = document.querySelector<HTMLElement>('#dropzone')!
 const fileInput = document.querySelector<HTMLInputElement>('#file-input')!
 const pickerError = document.querySelector<HTMLElement>('#picker-error')!
 const source = document.querySelector<HTMLElement>('#source')!
+const chartHost = document.querySelector<HTMLElement>('#chart-host')!
 const tableHost = document.querySelector<HTMLElement>('#table-host')!
 const userSelectHost = document.querySelector<HTMLElement>('#user-select-host')!
 const typeSelectHost = document.querySelector<HTMLElement>('#type-select-host')!
@@ -32,6 +41,15 @@ let typeSelect: MultiSelect | null = null
 const selectedUsers = new Set<number>()
 const selectedTypes = new Set<string>()
 let monthWindow: MonthWindow = { from: 0, to: 0 }
+
+// Kept between renders so a resize can redraw the chart at the new width
+// without recomputing the pivot or resetting the table's scroll position.
+let series: SeriesPoint[] = []
+let bands: TypeSeries[] = []
+/** Width the chart was last drawn at, so a resize can tell whether it matters. */
+let chartWidth = 0
+/** Whether the chart splits the total into one area per account type. */
+let stacked = false
 
 function showError(message: string): void {
   pickerError.textContent = message
@@ -68,14 +86,44 @@ function emptyNote(text: string): HTMLElement {
   return p
 }
 
+/** Draws the stored series at the host's current width. */
+function drawChart(): void {
+  if (series.length === 0) {
+    chartHost.replaceChildren()
+    chartWidth = 0
+    return
+  }
+  chartWidth = chartHost.clientWidth
+  renderChart(chartHost, series, bands, {
+    stacked,
+    onStackedChange: (next) => {
+      stacked = next
+      drawChart()
+    },
+  })
+}
+
+// The chart is laid out in pixels, so it has to be redrawn whenever its box
+// changes width — a window resize, but also the page's own scrollbar appearing
+// once the chart is in place. Comparing widths first keeps that from looping.
+new ResizeObserver(() => {
+  if (chartHost.clientWidth !== chartWidth) drawChart()
+}).observe(chartHost)
+
 function renderPortfolio(): void {
   if (!portfolio) return
 
   if (selectedUsers.size === 0) {
+    series = []
+    bands = []
+    drawChart()
     tableHost.replaceChildren(emptyNote('Select at least one user.'))
     return
   }
   if (selectedTypes.size === 0) {
+    series = []
+    bands = []
+    drawChart()
     tableHost.replaceChildren(emptyNote('Select at least one account type.'))
     return
   }
@@ -86,6 +134,10 @@ function renderPortfolio(): void {
     from: monthWindow.from,
     to: monthWindow.to,
   })
+  series = totalsByMonth(result)
+  bands = totalsByType(result)
+  drawChart()
+
   tableHost.replaceChildren(
     renderPivot(result, {
       showType: selectedTypes.size > 1,
