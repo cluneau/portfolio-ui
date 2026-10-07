@@ -27,7 +27,15 @@ jobs:
           node-version: lts/*
           cache: 'npm'
       - run: npm ci
+      # Google Drive is optional: unset, the build simply ships a Drive button
+      # that explains the setup is missing. Vite inlines these into the bundle,
+      # so they are readable in the published page — they are kept in secrets to
+      # keep them out of the repository's history, not to hide them from users.
       - run: npm run build
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          VITE_GOOGLE_APP_ID: ${{ secrets.GOOGLE_APP_ID }}
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
