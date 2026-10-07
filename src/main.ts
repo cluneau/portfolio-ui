@@ -3,6 +3,7 @@ import { PortfolioDb } from './db'
 import { freezeLabelColumns, renderPivot } from './table'
 import { renderChart } from './chart'
 import { renderDeltaChart } from './delta-chart'
+import { pickFromDrive, prefetchDrive } from './drive'
 import {
   accountTypes,
   changesByMonth,
@@ -25,6 +26,8 @@ const results = document.querySelector<HTMLElement>('#results')!
 const dropzone = document.querySelector<HTMLElement>('#dropzone')!
 const fileInput = document.querySelector<HTMLInputElement>('#file-input')!
 const pickerError = document.querySelector<HTMLElement>('#picker-error')!
+const pickerStatus = document.querySelector<HTMLElement>('#picker-status')!
+const driveButton = document.querySelector<HTMLButtonElement>('#drive-button')!
 const source = document.querySelector<HTMLElement>('#source')!
 const chartHost = document.querySelector<HTMLElement>('#chart-host')!
 const deltaHost = document.querySelector<HTMLElement>('#delta-host')!
@@ -59,6 +62,12 @@ let stacked = false
 function showError(message: string): void {
   pickerError.textContent = message
   pickerError.hidden = false
+}
+
+/** Progress and waiting notices, which are not failures. Null clears the line. */
+function showStatus(message: string | null): void {
+  pickerStatus.textContent = message ?? ''
+  pickerStatus.hidden = message === null
 }
 
 /** Turns the raw failure into something a human can act on. */
@@ -176,9 +185,14 @@ function renderPortfolio(): void {
 // re-rendered or the viewport changes.
 window.addEventListener('resize', () => freezeLabelColumns(tableHost))
 
-async function load(file: File): Promise<void> {
+/**
+ * Opens a database and shows it. The file is a `File` whether it came from the
+ * local picker or from Drive, so `origin` is only there to say so on screen.
+ */
+async function load(file: File, origin?: string): Promise<void> {
   pickerError.hidden = true
   dropzone.classList.add('busy')
+  driveButton.disabled = true
 
   let db: PortfolioDb | null = null
   let tables: string[] | null = null
@@ -225,7 +239,8 @@ async function load(file: File): Promise<void> {
     )
 
     const n = loaded.users.length
-    source.textContent = `${file.name} — ${n} ${n === 1 ? 'user' : 'users'}, ${loaded.rows.length} monthly balances`
+    const from = origin ? ` from ${origin}` : ''
+    source.textContent = `${file.name}${from} — ${n} ${n === 1 ? 'user' : 'users'}, ${loaded.rows.length} monthly balances`
 
     // Reveal before rendering, not after: freezing the label columns measures
     // their rendered widths, and a display:none table measures zero.
@@ -237,10 +252,56 @@ async function load(file: File): Promise<void> {
     showError(explain(err, tables))
   } finally {
     dropzone.classList.remove('busy')
+    driveButton.disabled = false
+    showStatus(null)
     // Let the same file be picked again after a failure.
     fileInput.value = ''
   }
 }
+
+const sizeFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 })
+const percentFormat = new Intl.NumberFormat(undefined, {
+  style: 'percent',
+  maximumFractionDigits: 0,
+})
+
+/**
+ * The Drive path, which differs from the local one only in how it gets hold of
+ * the file: sign in, pick, download, then hand the bytes to the same loader.
+ */
+async function loadFromDrive(): Promise<void> {
+  pickerError.hidden = true
+  driveButton.disabled = true
+  // Signing in and picking both happen in Google's own windows, so the page
+  // says what it is waiting for rather than looking idle.
+  showStatus('Waiting for Google…')
+  try {
+    const file = await pickFromDrive(({ loaded, total }) => {
+      const done = `${sizeFormat.format(loaded / 1e6)} MB`
+      showStatus(
+        total > 0
+          ? `Downloading… ${percentFormat.format(loaded / total)} of ${sizeFormat.format(total / 1e6)} MB`
+          : `Downloading… ${done}`,
+      )
+    })
+    // Null means the user closed the sign-in window or the Picker, which needs
+    // no explaining.
+    if (!file) return
+    showStatus(`Reading ${file.name}…`)
+    await load(file, 'Google Drive')
+  } catch (err) {
+    showError(err instanceof Error ? err.message : String(err))
+  } finally {
+    driveButton.disabled = false
+    showStatus(null)
+  }
+}
+
+// Google's scripts are fetched on the way to the button, not on the click: the
+// sign-in pop-up has to open inside the gesture that asked for it.
+driveButton.addEventListener('pointerenter', prefetchDrive)
+driveButton.addEventListener('focus', prefetchDrive)
+driveButton.addEventListener('click', () => void loadFromDrive())
 
 fileInput.addEventListener('change', () => {
   const file = fileInput.files?.[0]
@@ -267,4 +328,5 @@ resetButton.addEventListener('click', () => {
   results.hidden = true
   picker.hidden = false
   pickerError.hidden = true
+  showStatus(null)
 })

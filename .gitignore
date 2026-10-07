@@ -7,6 +7,11 @@
 *.duckdb.wal
 *.wal
 
+# Local Google Drive identifiers. Not secrets — they ship in the bundle either
+# way — but they are kept out of the repository, so only .env.example is tracked.
+.env
+.env.local
+
 node_modules/
 dist/
 .DS_Store

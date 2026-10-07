@@ -16,6 +16,15 @@
           <span class="button">Choose file…</span>
           <input id="file-input" type="file" accept=".db,.duckdb" hidden />
         </label>
+        <!-- Outside the dropzone on purpose: that is a <label> for the file
+             input, so a button inside it would open the local file dialog. -->
+        <div class="picker-alt">
+          <span class="dz-or">or</span>
+          <button id="drive-button" class="button secondary" type="button">
+            Load from Google Drive
+          </button>
+        </div>
+        <p id="picker-status" class="picker-status" hidden></p>
         <p class="privacy">
           The database is read inside your browser. It is never uploaded.
         </p>
